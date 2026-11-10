@@ -1,0 +1,23 @@
+.tools/
+Scripts/priorities.tsv*
+Scripts/automations.tsv*
+__pycache__/
+releases/
+.venv/
+.env
+.env.*
+*.log
+*.dmp
+*.sav
+*.pdb
+*.dll
+*.pak
+*.tmp
+.workshop.json
+workshop_path.txt
+
+# Local development journals and live play captures are not public artifacts.
+/docs/*
+!/docs/development.md
+!/docs/workshop.md
+!/docs/*-preview.png
