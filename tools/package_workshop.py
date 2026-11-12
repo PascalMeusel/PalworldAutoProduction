@@ -1,4 +1,4 @@
-"""Build a draft official-loader package from the verified manual ZIP; never upload."""
+"""Build an official-loader package from the verified manual ZIP; never upload."""
 from pathlib import Path
 import json
 import re
@@ -22,7 +22,7 @@ with ZipFile(root / 'releases/PalworldAutoProduction-Bases.zip') as manual:
 payload['Info.json'] = metadata
 payload['thumbnail.png'] = (root / 'docs/overview-preview.png').read_bytes()
 assert payload['thumbnail.png'].startswith(b'\x89PNG\r\n\x1a\n')
-dest = root / 'releases/PalworldAutoProduction-Workshop-draft.zip'
+dest = root / 'releases/PalworldAutoProduction-Workshop.zip'
 stage = dest.with_suffix('.zip.tmp')
 with ZipFile(stage, 'w') as archive:
     for name, content in sorted(payload.items()):
@@ -35,4 +35,4 @@ with ZipFile(stage) as archive:
     for name, content in payload.items():
         assert archive.read(name) == content, name
 stage.replace(dest)
-print(f'Verified {len(payload)} files in {dest}; Workshop installation still needs a live test')
+print(f'Verified {len(payload)} source-matching files in {dest}; no upload performed')

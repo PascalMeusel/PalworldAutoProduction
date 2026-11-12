@@ -27,5 +27,5 @@ jobs:
         run: python tests/render_preview.py
       - name: Verify manual release archive
         run: python tools/package.py
-      - name: Verify Workshop draft archive
+      - name: Verify Workshop archive
         run: python tools/package_workshop.py

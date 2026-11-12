@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0-beta.2 — Unreleased candidate
+## 0.1.0-beta.2 — 2026-11-13
 
-Native acceptance and performance testing are pending. This build has not been uploaded to Workshop or GitHub Releases.
+Production reliability and per-station controls. See [testing results and remaining limits](docs/testing.md).
 
 - Preserve Auto Produce through temporary recipe/identity gaps; isolate menu, food, statistics and individual station failures.
 - Use a fresh native production model per operation with normal engine lifetime flags; validate station binding, selected recipe and quantity before requesting work.
@@ -11,6 +11,7 @@ Native acceptance and performance testing are pending. This build has not been u
 - Coalesce finish/pickup notifications into bounded station-only checks, retaining polling and rejected-request backoff. Recognize a small batch that finishes before polling observes its queue.
 - Optional base stock targets, including reservations for tracked automatic batches so multiple automated stations share the budget. Unlimited remains the default.
 - Migrate version 1 automation settings without losing recipes or ON/OFF choices; retain interrupted-write recovery.
+- Confirm an AFK food transfer from the received item even when Pals replenish the feed box before the next check. Avoid keeping the old source slot across checks.
 - Add production, notification-flood, shared-stock and settings regression coverage, an example settings layout, and a native testing checklist.
 
 The Workshop report establishes a crash and a stop after ten crafts, but supplies no log, call stack, game/loader versions or host/client details. The corrected defects can interrupt refills under test; they do not establish the cause of that player's crash.

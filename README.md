@@ -4,17 +4,17 @@ Manage your guild's loaded bases from the same menu as Inventory, Party and Guil
 
 **Public beta · Windows Steam · MIT license**
 
-**Working tree: beta.2 candidate.** The production settings and stability changes below have automated coverage; live acceptance/performance testing and publication are pending. The download link still points to the published beta.1.
+**Beta.2:** more reliable refills, saved batch sizes, optional stock targets and a fix for interrupted AFK meals. See [test results and limits](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/docs/testing.md).
 
-[Download the beta](https://github.com/PascalMeusel/PalworldAutoProduction/releases/tag/v0.1.0-beta.1) · [Report an issue](https://github.com/PascalMeusel/PalworldAutoProduction/issues) · [Changelog](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/CHANGELOG.md)
+[Download the beta](https://github.com/PascalMeusel/PalworldAutoProduction/releases/tag/v0.1.0-beta.2) · [Report an issue](https://github.com/PascalMeusel/PalworldAutoProduction/issues) · [Changelog](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/CHANGELOG.md)
 
-Tested during development on Windows Steam Palworld `v1.0.5.102999` with the Palworld UE4SS fork at `ba2efd55`. Single-player/local host is the primary target. Compatibility with other game versions and multiplayer setups is not established. Back up your world before trying a beta. Requires a separately installed compatible [UE4SS runtime](https://github.com/Okaetsu/RE-UE4SS); the release does not bundle a loader or game assets.
+Tested on Windows Steam Palworld `v1.0.5.102999` with the Palworld UE4SS fork at `ba2efd55` and the Workshop runtime at `2281fa31`. Single-player/local host is the primary target. Compatibility with other game versions and multiplayer setups is not established. Back up your world before trying a beta. Requires a separately installed compatible [UE4SS runtime](https://github.com/Okaetsu/RE-UE4SS); the release does not bundle a loader or game assets.
 
 ![Bases dashboard with illustrative example data](https://raw.githubusercontent.com/PascalMeusel/PalworldAutoProduction/main/docs/overview-preview.png)
 
 *Preview rendered from example data; the game supplies its own native background and fonts.*
 
-The author has uploaded the beta to [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3837541491). See the [packaging and update notes](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/docs/workshop.md); the candidate still needs validation through the Workshop loader.
+Also available on [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3837541491). The official loader's beta.1 → beta.2 update preserved automation and priority settings in a live test. See the [packaging and update notes](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/docs/workshop.md), especially if you customized `config.lua`.
 
 ## Open Bases
 
@@ -55,7 +55,7 @@ Settings live in `Scripts/automations.tsv` beside the mod, with a `.bak` recover
 
 **Keep in base storage:** the same screen offers an optional target, such as 100 Salad. **Unlimited** is the default. The mod pauses new refills when stored stock plus tracked automatic batches meets the target, then resumes as stock is used. This counts the selected recipe's output items, including multi-item yields, and excludes carried inventory. Automatic stations in this mod reserve their requested output together. Set a target on every station you want limited; an Unlimited station keeps refilling. Manual queues, other mods, other players and output delivered between measurements can exceed the target; a single craft can also yield more items than the remaining deficit. Existing queues always finish. Changing recipe resets the old product's target to Unlimited.
 
-Refills wait until the preceding batch has finished and its products have been collected. Production/pickup notifications can wake just the affected station after a short deferred delay; bursts are coalesced, each station is rate limited, and at most two stations are handled per callback. Ordinary polling remains the fallback. These are design bounds, not measured FPS results; compare `FAST_REFILL = false` during native acceptance. A rejected request still backs off rather than hammering the game.
+Refills wait until the preceding batch has finished and its products have been collected. Production/pickup notifications can wake just the affected station after a short deferred delay; bursts are coalesced, each station is rate limited, and at most two stations are handled per callback. Ordinary polling remains the fallback. Set `FAST_REFILL = false` to troubleshoot a loader or compare performance. A rejected request still backs off rather than hammering the game. See the scoped performance measurements in the test results; large automated bases and remote clients remain unverified.
 
 The character must be in the station's guild base for a new refill. Leaving keeps the saved choice ON and shows **Visit base to resume**; accepted queues continue normally. **Waiting for pickup**, **Waiting for resources**, **Stock target reached** and unavailable-data statuses explain pauses. Temporary failures retain the saved choice and retry. A menu or meal error cannot abort all automatic refills.
 
@@ -79,7 +79,9 @@ Do not run Pal Work Priority alongside built-in management. Release any restrict
 
 ## Installation and settings
 
-With the game closed, extract the release ZIP into **one active UE4SS Mods directory**, keeping the outer `PalworldAutoProduction` folder. Common locations are `Pal/Binaries/Win64/ue4ss/Mods` and `Mods/NativeMods/UE4SS/Mods` under Palworld. If the loader uses `mods.txt`, enable `PalworldAutoProduction : 1` above Keybinds. Preserve your existing config and priority files on a manual update.
+With the game closed, extract the **Bases.zip** release into **one active UE4SS Mods directory**, keeping the outer `PalworldAutoProduction` folder. Common locations are `Pal/Binaries/Win64/ue4ss/Mods` and `Mods/NativeMods/UE4SS/Mods` under Palworld. If the loader uses `mods.txt`, enable `PalworldAutoProduction : 1` above Keybinds. Preserve your existing config, automation and priority files on a manual update. The separate **Workshop.zip** is an uploader package, not a manual UE4SS installation archive.
+
+Workshop updates preserve the generated `automations.tsv*` and `priorities.tsv*` files in the tested loader. They replace packaged files, including `config.lua`: back up and reapply any custom global settings after an update. Per-station batch sizes, stock targets and ON/OFF choices are stored in the preserved automation file.
 
 From the source directory, `Install.ps1 -ModsDirectory <active Mods directory>` installs the manifest, preserves existing configuration and priority files, and backs up the previous installation outside Mods. It never stops the game. The optional `-DisableLegacyPriority` switch disables the old Lua component after backing it up.
 

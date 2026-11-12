@@ -1,6 +1,31 @@
-# Beta.2 acceptance plan
+# Beta.2 testing and acceptance
 
-Status: automated coverage and example layouts only. Native acceptance, performance comparison and publishing are deferred until the user makes the PC available. Do not substitute an old beta.1 live session for these checks.
+Beta.2 was tested on an isolated single-player save on November 12–13, 2026. Windows Steam Palworld `v1.0.5.102999` was exercised with the manual Palworld UE4SS fork `ba2efd55` and official Workshop runtime `2281fa31`, one active loader at a time. The loaded base had 14 Pals, 16 recipe stations and two feed boxes. Results below describe this scope, not all multiplayer or loader combinations.
+
+## Observed in Palworld
+
+- An accepted ten-craft Salad batch completed and was followed by repeated one-craft refills. Changing the configured batch during production left the existing queue unchanged. More than twenty refill confirmations were recorded across the test sessions; the log rate limit means this is a lower bound.
+- Saved Salad, ON, batch size 1 and target 500 restored after process restarts without opening Bases. The official beta.1 → beta.2 installation preserved automation and priority TSV files byte for byte.
+- A target of 50 stopped new refills after the current batch; raising it to 500 resumed them. Waiting for pickup appeared while finished output remained, and Pals transported it before refills continued.
+- Supplies inspection displayed native craft limits and ingredient counts without starting an inspection batch. Both long lists scrolled, Party and other native tabs remained accessible, and F8/Escape closed the menu. A sword attack worked after returning to gameplay.
+- Food history warmed through normal gameplay and remained available across menu closures. Volatile readings suppressed precise forecasts rather than inventing a depletion time.
+- One real Salad moved from a feed box and was consumed: carried stack 1 → 0 and fullness 6.1% → 89.8%. This exposed and verified the fix for a concurrent delivery invalidating the old source-count check. New regression cases cover a replenished or unreadable old source slot.
+- Repeated normal returns to title and process exits produced no new crash reports during these tests. That does not prove the reported player's crash is fixed.
+
+The direct kitchen button, multiplayer notifications, two simultaneous kitchens sharing a target, multi-item yields in-game, forced power/ingredient failures, streamed-base replacement and priority restoration have not all been repeated in this beta.2 session. Automated cases cover many of these conditions; broader native acceptance remains listed below. Custom global `config.lua` edits are replaced by Workshop updates and must be reapplied; generated station and priority settings survive in the tested loader.
+
+## Frame-time comparison
+
+Intel PresentMon 2.6.0, 45-second captures after warm-up, same camera and save, 60 FPS cap. One Salad automation, batch 1, stock target 500, official Workshop runtime. Dynamic Pal activity was not identical between runs.
+
+| Fast refill | Dashboard | Mean ms | 95th percentile ms | 99th percentile ms |
+| --- | --- | ---: | ---: | ---: |
+| Off | Closed | 16.71 | 19.43 | 23.76 |
+| On | Closed | 16.72 | 19.43 | 23.36 |
+| Off | Status open | 16.74 | 19.35 | 22.94 |
+| On | Status open | 16.74 | 19.29 | 22.73 |
+
+No material regression was observed in this capped scene. These short captures do not establish performance for many enabled stations, uncapped play or other machines. Periodic base collection typically reported 4–13 ms total work split over one or two slices; cold opening could take about 50–66 ms and remains an optimization opportunity. All four fast-refill hooks registered on both tested loaders. Polling-only production also continued normally.
 
 ## Report and investigation
 
@@ -19,9 +44,9 @@ A focused replay against the published `main.lua` (matching the local Workshop s
 
 Run `python tests/run.py`, `python tests/render_preview.py`, `python tools/package.py`, and `python tools/package_workshop.py`.
 
-Coverage includes twenty consecutive refills interleaved with ingredient inspections and simulated native collection; transient empty/failing recipes; partial/zero/unknown supply limits; wrong native model bindings and recipes; unrelated menu/meal/statistics failures; one failing station among healthy ones; pickup waits; a completed batch missed by polling; rejected-request backoff; 1,000 notifications coalesced without queue/food/UI work inside hooks; paused notification cancellation; shared stock reservations including unconfirmed requests; unknown inventory reads; old-file migration, corrupt/interrupted writes and per-world isolation. Nine example layouts are rendered and checked for text overflow. These mocks cannot reproduce a native crash or measure game FPS.
+All suites passed: 5,220 assertions plus Lua 5.4 parsing. Coverage includes twenty consecutive refills interleaved with ingredient inspections and simulated native collection; transient empty/failing recipes; partial/zero/unknown supply limits; wrong native model bindings and recipes; unrelated menu/meal/statistics failures; one failing station among healthy ones; pickup waits; a completed batch missed by polling; rejected-request backoff; 1,000 notifications coalesced without queue/food/UI work inside hooks; paused notification cancellation; shared stock reservations including unconfirmed requests; unknown inventory reads; old-file migration, corrupt/interrupted writes and per-world isolation. Nine example layouts passed text-overflow checks. These mocks cannot reproduce a native crash or measure game FPS.
 
-## Native acceptance on an isolated save
+## Further native acceptance on an isolated save
 
 1. Back up the existing save and automation/priority settings. Use one active loader and one copy of the mod. Record game, loader and candidate versions. Keep real play data separate from the test world.
 2. Open the kitchen, select Salad, enable Auto Produce and observe at least twenty refills. Alternate opening/closing the native station, Supplies, Batch settings and other menu tabs. Check ON remains green, native transport still works, and there are no new errors/crash reports.
@@ -31,13 +56,13 @@ Coverage includes twenty consecutive refills interleaved with ingredient inspect
 6. Set a stock target at one kitchen, then two kitchens producing the same item. Verify the shared budget includes queued, finished and unconfirmed automatic output. Test a multi-item recipe yield, removing stock, changing recipes, unknown inventory, manual queues and another player's activity. Confirm the game's base-item counting function excludes carried items and establish whether it already includes station output; conservative double-counting must resolve after transport. Do not advertise strict caps against manual/other-mod production.
 7. Recheck F8/Escape/input restoration, Party tab navigation, long-list scrolling, food forecast continuity and priority restoration. Return to title and reopen a world repeatedly to exercise native destruction and object collection. Exit normally and check for a new crash report rather than relying on the sticky previous-session warning.
 
-## Performance gate
+## Broader performance checks
 
 Compare the same isolated save and camera position with `FAST_REFILL = false` and `true`, after warm-up. Observe frame times and script/native timings with no automations, one kitchen, and many enabled stations; repeat with stock targets off/on and the menu closed/open. Check event storms, at least ten minutes of normal play and memory growth across repeated batches. No faster global scanning, unbounded callback growth or material frame-time regression is acceptable. If the native hooks are noisy or unsafe on a supported loader, disable them for release and keep polling until corrected.
 
-## Publication gate
+## Publication procedure
 
-Only after the native checks: verify migration through an actual Workshop update; preserve uploader identity and user data; rerun checks and reproducible packaging; update the candidate wording/version/testing scope; then push GitHub and upload to the existing Workshop item. Keep any unverified loader/client combinations explicitly unverified. No update has been published by preparing these files.
+Verify migration through an actual Workshop update; preserve uploader identity and user data; rerun checks and reproducible packaging; document the observed testing scope; then push GitHub and upload to the existing Workshop item. Keep unverified loader/client combinations explicitly unverified. Package builders never publish by themselves.
 
 ## Feature research
 
