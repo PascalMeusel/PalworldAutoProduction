@@ -103,6 +103,16 @@ f:advance(5);eq(f.module.meals,1)
 f:advance(120);eq(f.requests,1);eq(f.scans,1)
 f.full=20;f:advance(5);eq(f.requests,2);eq(f.scans,1)
 
+-- A delivery can replace or exceed the transferred amount before the next tick.
+-- Confirmation follows the real destination item, not the source's net count.
+for _,refill in ipairs({20,100,"unloaded"}) do
+    f=fixture();f:advance(60)
+    if refill=="unloaded" then
+        f.food.GetStackCount=function() error("Old feed-box slot is no longer readable") end
+    else f.food.count=refill end
+    f:advance(10);eq(f.uses,1);eq(f.module.meals,1);eq(f.empty.count,0)
+end
+
 for _,kind in ipairs({"common","pouch"}) do
     f=fixture();f[kind].ItemSlotArray={f.slot("Salad",1)}
     f:advance(120);eq(f.requests,0);eq(f.module.status,"Food already in your inventory");eq(f.scans,0)

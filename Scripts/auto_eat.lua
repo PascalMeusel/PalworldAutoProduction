@@ -142,24 +142,25 @@ local function tick(now)
         local count=U.number(U.read(function() return pending.slot:GetStackCount() end))
         local item=U.name(U.read(function() return pending.slot.ItemId.StaticId end))
         if count~=1 or item~=pending.item then note("Waiting for food transfer");return end
-        local source_count=U.number(U.read(function() return pending.source:GetStackCount() end))
-        if not source_count or source_count>=pending.source_count then note("Checking feed box transfer");return end
+        -- Pals can replenish the source between our checks. The matching item
+        -- in the previously empty destination confirms arrival; a net decrease
+        -- in the feed box is not required (and its old slot may be unloaded).
         if U.read(function() return pending.slot:CanUseItemToCharacter(target) end)~=true then failed(now,"Transferred food unavailable");return end
         pending.phase="eating";pending.at=now;pending.fullness=fullness;pending.count=count
-        U.log(string.format("AFK meal: received one %s (feed box %d -> %d); requesting use.",item,pending.source_count,source_count))
+        U.log(string.format("AFK meal: received one %s from a feed box; requesting use.",item))
         pending.slot:RequestUseToCharacter(target,1)
         note("Eating "..item.." from a feed box");return
     end
     if not U.valid(empty) then note("Need a free inventory slot");return end
     for _,box in ipairs(sources.feed_boxes(base_id)) do
         local container=U.read(function() return box:GetItemContainerModule():GetContainer() end)
-        local candidate,item,before
+        local candidate,item
         U.each(U.read(function() return container.ItemSlotArray end),function(slot)
             if candidate then return end
             local count=U.number(U.read(function() return slot:GetStackCount() end))
             if count and count>0 then
                 local amount,name=nutrition(slot,pc)
-                if amount and amount>0 and U.read(function() return slot:CanUseItemToCharacter(target) end)==true then candidate=slot;item=name;before=count end
+                if amount and amount>0 and U.read(function() return slot:CanUseItemToCharacter(target) end)==true then candidate=slot;item=name end
             end
         end)
         if candidate then
@@ -173,7 +174,7 @@ local function tick(now)
             local request=U.read(function() return StaticFindObject("/Script/Engine.Default__KismetGuidLibrary"):NewGuid() end)
             if not U.valid(net) or not U.guid(request) or not U.guid(U.read(function() return from.ContainerId.ID end))
                 or not U.guid(U.read(function() return to.ContainerId.ID end)) then note("Food transfer unavailable");return end
-            pending={phase="moving",at=now,item=item,slot=empty,source=candidate,source_count=before}
+            pending={phase="moving",at=now,item=item,slot=empty}
             net:RequestMove_ToServer(request,to,{{SlotId=from,Num=1}})
             note("Getting a meal from a feed box")
             return
