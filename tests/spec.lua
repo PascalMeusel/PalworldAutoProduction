@@ -3,6 +3,17 @@ local function eq(a,b,message) checks=checks+1; assert(a==b,(message or "mismatc
 local function near(a,b) checks=checks+1;assert(math.abs(a-b)<0.001,tostring(a).." ~= "..tostring(b)) end
 local function test(name,fn) fn();tests=tests+1;print("PASS "..name) end
 local policy=require("priority_policy")
+test("Older loaders probe missing destruction-flag methods only once",function()
+    local old_module=package.loaded.ap_util
+    package.loaded.ap_util=nil
+    local U=require("ap_util")
+    local old_flags=EObjectFlags
+    EObjectFlags={RF_BeginDestroyed=0x8000,RF_FinishDestroyed=0x10000}
+    local calls=0
+    local v={IsValid=function() return true end,HasAnyFlags=function() calls=calls+1;error("unsupported bridge method") end}
+    eq(U.valid(v),true);eq(U.valid(v),true);eq(calls,1)
+    EObjectFlags=old_flags;package.loaded.ap_util=old_module
+end)
 test("Deferred work stays on the native game-thread timer, with an older-loader fallback",function()
     local U=require("ap_util")
     local calls,queued={},{}

@@ -1,5 +1,6 @@
 local M = {}
 local cached_controller
+local flag_check_supported
 function M.defer(milliseconds, callback)
     -- Current UE4SS can keep the timer and callback on the game thread.
     -- Avoid recurring async -> game-thread handoffs against the shared Lua
@@ -28,10 +29,13 @@ function M.valid(v)
     if not ok or result~=true then return false end
     -- Some loader builds still expose an object during BeginDestroy. Do not
     -- call UI/game methods on it merely because its wrapper is non-null.
-    if EObjectFlags then
+    if EObjectFlags and flag_check_supported~=false then
         local mask=(EObjectFlags.RF_BeginDestroyed or 0) | (EObjectFlags.RF_FinishDestroyed or 0)
         if mask~=0 then
             local checked,destroying=pcall(function() return v:HasAnyFlags(mask) end)
+            -- Older bridges may expose the constants without the method. Do
+            -- not repeat an expensive failed reflection lookup on every read.
+            flag_check_supported=checked
             if checked and destroying then return false end
         end
     end
