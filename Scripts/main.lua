@@ -14,6 +14,7 @@ local config = {
     enabled = user_config.ENABLED ~= false,
     batch_size = math.floor(tonumber(user_config.BATCH_SIZE) or DEFAULTS.BATCH_SIZE),
     scan_interval_ms = math.floor(tonumber(user_config.SCAN_INTERVAL_MS) or DEFAULTS.SCAN_INTERVAL_MS),
+    fast_refill = user_config.FAST_REFILL ~= false,
 }
 config.batch_size = math.max(1, math.min(config.batch_size, 9999))
 config.scan_interval_ms = math.max(1000, math.min(config.scan_interval_ms, 10000))
@@ -28,7 +29,6 @@ local UI_MODEL_CLASS_PATH = "/Game/Pal/Blueprint/UI/CovertItemMenu/Model/BP_PalU
 local WORKSPACE_CLASS_PATH = "/Game/Pal/Blueprint/UI/UserInterface/IngameMenu/WBP_IngameMenu_WorkSpace.WBP_IngameMenu_WorkSpace_C"
 local MAIN_MENU_CLASS_PATH = "/Game/Pal/Blueprint/UI/InGameMainMenu/WBP_InGameMainMenu.WBP_InGameMainMenu_C"
 local scheduler_ui_class = nil
-local scheduler_ui = nil
 local recipe_products = nil
 local recipe_product_counts = nil
 local active_workspace = nil
@@ -55,13 +55,7 @@ local function log(message)
 end
 
 local function valid(object)
-    if object == nil then
-        return false
-    end
-    local ok, result = pcall(function()
-        return object:IsValid()
-    end)
-    return ok and result == true
+    return U.valid(object)
 end
 
 local function unwrap(value)
@@ -228,8 +222,18 @@ local function restore_automations(force)
     end
 end
 
-local function save_automation(station,recipe,on)
-    local saved,reason=automation_state:save(station,recipe,on)
+local function batch_size(station)
+    local active=auto_by_station[station_key(station)]
+    return (active and active.batch_size) or automation_state:batch_size(station,config.batch_size)
+end
+
+local function stock_target(station)
+    local active=auto_by_station[station_key(station)]
+    return (active and active.stock_target) or automation_state:stock_target(station)
+end
+
+local function save_automation(station,recipe,on,batch,target)
+    local saved,reason=automation_state:save(station,recipe,on,batch,target)
     if not saved then log(reason) end
     return saved,reason
 end
@@ -293,7 +297,7 @@ local function release_workspace()
 end
 
 automation_state.on_session_change=function()
-    scheduler_ui=nil
+    scheduler_ui_class=nil
     recipe_products,recipe_product_counts=nil,nil
     release_workspace()
 end
@@ -320,7 +324,7 @@ local function selected_supported_recipe()
 end
 
 local function refresh_button()
-    if not valid(auto_button) or not valid(active_station) then
+    if not U.visible(active_workspace) or not valid(auto_button) or not valid(active_station) then
         return
     end
     local key = station_key(active_station)
@@ -332,7 +336,7 @@ local function refresh_button()
     require("base_data").remember_recipe(active_station,automation and automation.recipe_id or recipe_id)
 
     local is_enabled = automation ~= nil
-    workstation_ui.refresh(is_enabled,recipe_id~=nil,automation and automation.recipe_id,automation_state:save_warning())
+    workstation_ui.refresh(is_enabled,recipe_id~=nil,automation and automation.recipe_id,automation_state:save_warning(),automation and automation.status)
 end
 
 local function install_button(candidate)
@@ -355,6 +359,7 @@ local function install_button(candidate)
 end
 
 local function get_scheduler_ui(station)
+    if not U.live(station) then return nil end
     if not valid(scheduler_ui_class) then
         scheduler_ui_class = StaticFindObject(UI_MODEL_CLASS_PATH)
         if not valid(scheduler_ui_class) then
@@ -366,43 +371,28 @@ local function get_scheduler_ui(station)
         return nil
     end
 
-    if not valid(scheduler_ui) then
-        local player = player_controller()
-        local gameplay = StaticFindObject("/Script/Engine.Default__GameplayStatics")
-        local game_instance = nil
-        if valid(player) and valid(gameplay) then
-            pcall(function()
-                game_instance = gameplay:GetGameInstance(player)
-            end)
-        end
-        if not valid(game_instance) then
-            return nil
-        end
-        pcall(function()
-            scheduler_ui = StaticConstructObject(
-                scheduler_ui_class,
-                game_instance,
-                0,
-                0,
-                0x0E000000,
-                false,
-                false,
-                nil,
-                nil,
-                nil
-            )
-        end)
-    end
+    local player = player_controller()
+    local gameplay = U.read(function() return StaticFindObject("/Script/Engine.Default__GameplayStatics") end)
+    local game_instance = U.read(function() return gameplay:GetGameInstance(player) end)
+    if not valid(player) or not valid(game_instance) then return nil end
+    -- One synchronous game-thread operation owns this model. Never cache a
+    -- Lua-only UObject across ticks, rebind it to another station, or force
+    -- Native/Async/AsyncLoading flags to keep it alive. The engine can collect
+    -- it normally after the inspection/start request returns.
+    local ui = U.read(function() return StaticConstructObject(scheduler_ui_class,game_instance) end)
+    if not valid(ui) then return nil end
+    local ok = pcall(function() ui:Initialize(station) end)
+    if not ok then return nil end
+    local out={}
+    if U.read(function() return ui:TryGetConcreteModel(out) end)~=true
+        or not U.live(out.Model) or U.address(out.Model)~=U.address(station) then return nil end
+    return ui
+end
 
-    if not valid(scheduler_ui) then
-        return nil
-    end
-    local initialized = false
-    pcall(function()
-        scheduler_ui:Initialize(station)
-        initialized = true
-    end)
-    return initialized and scheduler_ui or nil
+local function can_refill(station)
+    return require("base_data").can_edit_station({station=station,
+        base_id=U.guid(U.read(function() return station:GetBaseCampIdBelongTo() end)),
+        station_id=U.guid(U.read(function() return station:GetInstanceId() end)) or U.address(station)})
 end
 
 local function station_is_idle(station)
@@ -424,9 +414,10 @@ end
 
 local function report_start_wait(automation, message)
     local now = os.time()
-    if now - (automation.last_status_at or 0) >= 30 then
+    if not automation.last_status_at or now - automation.last_status_at >= 30 then
         automation.last_status_at = now
-        log("AutoProduce is waiting for " .. automation.product_id .. ": " .. message)
+        log("AutoProduce [station="..station_key(automation.station)..", recipe="..automation.recipe_id
+            ..", batch="..tostring(automation.request_count or batch_size(automation.station)).."]: "..message)
     end
 end
 
@@ -463,11 +454,79 @@ local function recipe_choices(row,chosen)
     return choices
 end
 
-local function confirm_batch(automation,remain,recipe,now)
-    if remain and remain>0 and recipe==automation.request_recipe then
+local function output_count(station)
+    local slot=U.read(function() return station:GetProductSlot() end)
+    if not valid(slot) then return nil end
+    local count=U.number(U.read(function() return slot:GetStackCount() end))
+    return count and count>=0 and count or nil
+end
+
+-- A lazy budget for one scan/event drain. Read inventory once per product and
+-- reserve known automatic queues once per pass, including unconfirmed starts.
+-- Unlimited stations incur none of these extra inventory reads.
+local production_pass={}
+local function stock_key(station,product)
+    local base=U.guid(U.read(function() return station:GetBaseCampIdBelongTo() end))
+    return base and (base..":"..product)
+end
+local function stock_allowance(automation)
+    local target=stock_target(automation.station)
+    if target<=0 then return math.huge end
+    local key=stock_key(automation.station,automation.product_id)
+    if not key then return nil end
+    if not production_pass.queued then
+        local queued={}
+        production_pass.queued=queued
+        production_pass.unknown_products={}
+        for _,a in pairs(auto_by_station) do
+            if valid(a.station) then
+                local _,remain,recipe=station_is_idle(a.station)
+                local output=output_count(a.station)
+                local pending=remain==0 and output==0 and a.request_at and (a.request_count or batch_size(a.station)) or 0
+                if pending>0 then recipe=a.request_recipe or a.recipe_id end
+                local product=recipe_products and recipe_products[recipe] or a.product_id
+                local k=stock_key(a.station,product)
+                local yield=(recipe_product_counts or {})[recipe] or 1
+                if k then
+                    if not remain or remain<0 or output==nil
+                        or ((remain>0 or output>0) and (recipe=="" or recipe=="None")) then queued[k]=false
+                    elseif queued[k]~=false then
+                        queued[k]=(queued[k] or 0)+remain*yield+output+pending*yield
+                    end
+                else production_pass.unknown_products[product]=true end
+            end
+        end
+        production_pass.stock={}
+    end
+    if production_pass.queued[key]==false or production_pass.unknown_products[automation.product_id] then return nil end
+    local stock=production_pass.stock[key]
+    if stock==nil then
+        local utility=U.read(function() return StaticFindObject("/Script/Pal.Default__PalItemUtility") end)
+        stock=U.number(U.read(function() return utility:CountLocalPlayerInsideBaseCampItemNum64(player_controller(),FName(automation.product_id)) end))
+        production_pass.stock[key]=stock and stock>=0 and stock or false
+    end
+    if stock==false or not stock or stock<0 then return nil end
+    return math.max(0,math.ceil((target-stock-(production_pass.queued[key] or 0))/((recipe_product_counts or {})[automation.recipe_id] or 1)))
+end
+
+local function reserve_batch(automation)
+    if not production_pass.queued then return end
+    local key=stock_key(automation.station,automation.product_id)
+    if key and production_pass.queued[key]~=false then
+        production_pass.queued[key]=(production_pass.queued[key] or 0)+automation.request_count*((recipe_product_counts or {})[automation.recipe_id] or 1)
+    end
+end
+
+local function confirm_batch(automation,remain,recipe,now,completed)
+    if remain and (remain>0 or completed) and recipe==automation.request_recipe then
         base_stats.after_refill(station_key(automation.station),recipe,remain,now)
         automation.status="Producing"
-        log("Game confirmed "..remain.." queued craft(s) of "..automation.product_id..".")
+        -- One-craft batches should not turn successful refills into a log flood.
+        if not automation.last_confirm_log_at or now-automation.last_confirm_log_at>=30 then
+            automation.last_confirm_log_at=now
+            log(completed and ("Game completed the requested batch of "..automation.product_id.." before the next scan.")
+                or ("Game confirmed "..remain.." queued craft(s) of "..automation.product_id.."."))
+        end
         automation.request_at,automation.request_recipe=nil,nil
         return true
     end
@@ -486,7 +545,7 @@ local function supply_check(row)
     if not ok or U.name(U.read(function() return model:GetRecipeId() end))~=row.recipe_id then return nil,"The recipe could not be inspected." end
     -- This separate UI model never starts a batch while inspecting materials.
     local plan={at=os.time(),base=row.base_id,key=row.key,recipe=row.recipe_id,product=row.product,station=row.station_name,
-        batch=config.batch_size,yield_count=row.yield_count or 1,rate=row.rate,materials={},
+        batch=batch_size(row.station),yield_count=row.yield_count or 1,rate=row.rate,materials={},
         craftable=U.number(U.read(function() return model:CalcMaxProductableNum() end))}
     local utility=U.read(function() return StaticFindObject("/Script/Pal.Default__PalItemUtility") end)
     local function add(id,cost)
@@ -527,13 +586,20 @@ local function start_batch(automation)
     if now < (automation.retry_after or 0) then return end
     automation.retry_after = now + config.scan_interval_ms / 1000
     if automation.request_at then
-        if confirm_batch(automation,remain,current_recipe,now) then return end
-        if now-automation.request_at<10 then return end
-        automation.request_at,automation.request_recipe=nil,nil
-        automation.status="No queue confirmation"
-        automation.retry_after=now+15
-        report_start_wait(automation,"no matching queue was confirmed; retrying in 15 seconds")
-        return
+        local completed=remain==0 and (automation.completion_seen or (output_count(station) or 0)>0)
+        if confirm_batch(automation,remain,current_recipe,now,completed) then
+            automation.completion_seen=nil
+            -- A one-craft batch may finish and be collected between scans.
+            -- Continue immediately if the finish event confirmed it.
+            if not completed then return end
+        else
+            if now-automation.request_at<10 then return end
+            automation.request_at,automation.request_recipe=nil,nil
+            automation.status="No queue confirmation"
+            automation.retry_after=now+15
+            report_start_wait(automation,"no matching queue was confirmed; retrying in 15 seconds")
+            return
+        end
     end
     if not idle then
         automation.status = remain and remain > 0 and "Producing" or "Queue unavailable"
@@ -542,8 +608,21 @@ local function start_batch(automation)
     end
     if not station_has_recipe(station, automation.recipe_id) then
         automation.status = "Recipe unavailable"
-        auto_by_station[station_key(station)]=nil
-        log("AutoProduce stopped because the station no longer supports its saved recipe.")
+        automation.retry_after=now+5
+        report_start_wait(automation,"recipe data unavailable; keeping ON and retrying")
+        return
+    end
+    if not can_refill(station) then
+        automation.status="Visit base to resume"
+        automation.retry_after=now+5
+        report_start_wait(automation,"visit this station's guild base to refill")
+        return
+    end
+    local output=output_count(station)
+    if output==nil or output>0 then
+        automation.status=output==nil and "Output unavailable" or "Waiting for pickup"
+        automation.retry_after=now+5
+        report_start_wait(automation,output==nil and "output slot is not ready" or "finished products must be collected by Pals or the player")
         return
     end
     if not recipe_unlocked(automation.recipe_id) then
@@ -552,9 +631,18 @@ local function start_batch(automation)
         return
     end
 
+    local allowance=stock_allowance(automation)
+    if not allowance or allowance==0 then
+        automation.status=allowance==0 and "Stock target reached" or "Stock check unavailable"
+        automation.retry_after=now+5
+        return
+    end
+
     local ui = get_scheduler_ui(station)
-    if not valid(ui) or not valid(ui.ProductSettingModel) then
+    local model=U.read(function() return ui.ProductSettingModel end)
+    if not valid(ui) or not valid(model) then
         automation.status = "Waiting for station"
+        automation.retry_after=now+5
         report_start_wait(automation, "workstation production interface is not ready")
         return
     end
@@ -562,10 +650,29 @@ local function start_batch(automation)
     local started = false
     local can_start_code = nil
     local ok_start, start_error = pcall(function()
-        ui.ProductSettingModel:SelectRecipe(FName(automation.recipe_id))
-        ui.ProductSettingModel:SetProductNumByInput(config.batch_size)
+        model:SelectRecipe(FName(automation.recipe_id))
+        if to_name(model:GetRecipeId())~=automation.recipe_id then
+            automation.status="Recipe not selected"
+            return
+        end
+        local maximum=U.number(model:CalcMaxProductableNum())
+        if not maximum or maximum<0 then
+            automation.status="Supplies unavailable"
+            return
+        end
+        local count=math.min(batch_size(station),math.floor(maximum),allowance)
+        if count<1 then automation.status="Waiting for resources";return end
+        model:SetProductNumByInput(count)
+        -- Fail closed if another native callback changes the recipe/quantity.
+        local selected_count=U.number(model:GetProductNum())
+        if to_name(model:GetRecipeId())~=automation.recipe_id or not selected_count
+            or selected_count<1 or selected_count>count or selected_count%1~=0 then
+            automation.status="Recipe not selected"
+            return
+        end
+        automation.request_count=selected_count
         ui:UpdateProductSetting_TransportToStorage(true)
-        can_start_code = ui:CanStartProduction()
+        can_start_code = U.number(ui:CanStartProduction())
         if can_start_code == 0 then
             base_stats.before_refill(station_key(station), automation.recipe_id, remain,
                 (recipe_product_counts or {})[automation.recipe_id] or 1, now)
@@ -574,12 +681,15 @@ local function start_batch(automation)
         end
     end)
     if started then
+        reserve_batch(automation)
+        automation.completion_seen=nil
         automation.request_at,automation.request_recipe=now,automation.recipe_id
         automation.status="Confirming queue"
         local _,new_remaining,new_recipe=station_is_idle(station)
         confirm_batch(automation,new_remaining,new_recipe,now)
     elseif not ok_start then
         automation.status = "Start request failed"
+        automation.retry_after=now+15
         report_start_wait(automation, "game rejected the start request: " .. tostring(start_error))
     elseif can_start_code ~= nil then
         automation.status = ({[1]="Recipe not selected",[2]="Station unavailable",[3]="Power unit unavailable",
@@ -587,17 +697,76 @@ local function start_batch(automation)
         automation.retry_after=now+math.max(5,config.scan_interval_ms/1000)
         report_start_wait(automation, "normal recipe checks blocked the start (code " .. tostring(can_start_code) .. ")")
     else
-        report_start_wait(automation, "game did not confirm the start request")
+        automation.retry_after=now+5
+        report_start_wait(automation,automation.status or "game did not confirm the start request")
     end
 end
 
-local function clean_automations()
-    for key, automation in pairs(auto_by_station) do
-        if not automation_state:valid(automation) then
-            auto_by_station[key] = nil
-            automation_state.applied[key] = nil
+-- Fast path for this station only; it does not sample food, redraw the menu,
+-- discover objects or inspect other bases. Finish/pickup bursts are coalesced
+-- into one callback, rate limited per station, and drained two stations at a
+-- time. Periodic polling remains the fallback if a game build lacks a hook.
+local event_pending,event_timer={},false
+local function drain_station_events()
+    event_timer=false
+    production_pass={}
+    local synced,context=pcall(function() return automation_state:sync() end)
+    if not synced or not context then event_pending={};return end
+    local count=0
+    for key,entry in pairs(event_pending) do
+        event_pending[key]=nil
+        local automation=entry.automation
+        local ok,err=pcall(function()
+            if auto_by_station[key]==automation and automation_state:valid(automation) then
+                local status=automation.status
+                if status=="Producing" or status=="Waiting for pickup" or status=="Confirming queue"
+                    or status=="Starting" or status=="Resuming" then automation.retry_after=0 end
+                start_batch(automation)
+            end
+        end)
+        if not ok then
+            automation.status="Start request failed";automation.retry_after=os.time()+15
+            report_start_wait(automation,tostring(err))
         end
+        count=count+1
+        if count>=2 then break end
     end
+    if next(event_pending) and not event_timer then
+        event_timer=true;U.defer(100,drain_station_events)
+    end
+end
+local function station_changed(context,finished)
+    if not config.enabled or next(auto_by_station)==nil then return end
+    local station=U.unwrap(context)
+    local key=U.address(station)
+    local automation=key and auto_by_station[key]
+    if not automation then return end
+    local now=os.time()
+    -- No recipe, inventory or queue calls in the notification itself. A finish
+    -- signal only confirms a pending request if the later queue read matches.
+    if finished and automation.request_at then automation.completion_seen=true end
+    if (event_pending[key] and event_pending[key].automation==automation) or now<(automation.event_after or 0) then return end
+    automation.event_after=now+1
+    event_pending[key]={automation=automation}
+    if not event_timer then event_timer=true;U.defer(100,drain_station_events) end
+end
+
+local function set_station_settings(row,count,target)
+    restore_automations(true)
+    local allowed,reason=require("base_data").can_edit_station(row)
+    if not allowed then return false,reason end
+    if count~=nil and (type(count)~="number" or count~=count or count<1 or count>9999 or count%1~=0) then return false,"Choose 1 to 9999 crafts." end
+    if target~=nil and (type(target)~="number" or target~=target or target<0 or target>999999 or target%1~=0) then return false,"Choose a stock target from 0 to 999999; 0 is unlimited." end
+    local automation=auto_by_station[station_key(row.station)]
+    local recipe=automation and automation.recipe_id or row.recipe_id
+    if not recipe or recipe=="" or recipe=="None" or not station_has_recipe(row.station,recipe) then return false,"Choose an available recipe first." end
+    if automation then
+        automation.batch_size=count or automation.batch_size
+        automation.stock_target=target or automation.stock_target
+    end
+    local saved,warning=save_automation(row.station,recipe,automation~=nil,count,target)
+    row.batch_size,row.stock_target=batch_size(row.station),stock_target(row.station)
+    return true,"Saved for the next refill. The current queue is unchanged."..(saved and "" or " "..warning)
 end
 
 local function hovered(target)
@@ -639,10 +808,14 @@ toggle_active_station = function()
         station = active_station,
         recipe_id = recipe_id,
         product_id = product_id,
+        status = "Starting",
+        batch_size = batch_size(active_station),
+        stock_target = stock_target(active_station),
     }
     save_automation(active_station,recipe_id,true)
     refresh_button()
     log("AutoProduce enabled for " .. product_id .. ". It will keep refilling while the game accepts the normal start request.")
+    station_changed(active_station,false)
     schedule_scan()
 end
 
@@ -881,22 +1054,54 @@ local function observe_main_menu_object(candidate)
     queue_menu_check(candidate, main_menu_event_generation, 1)
 end
 
+local scan_errors={}
+local function scan_job(label,fn,on_error)
+    local ok,err=pcall(fn)
+    if ok then return true end
+    if on_error then on_error() end
+    local now=os.time()
+    if not scan_errors[label] or now-scan_errors[label]>=30 then
+        scan_errors[label]=now
+        log(label.." failed; other jobs continue: "..tostring(err))
+    end
+    return false
+end
+
 local function scan()
     if not config.enabled or is_scanning then
         return
     end
     is_scanning = true
-    local ok_scan, err = pcall(function()
+    production_pass={}
+    scan_job("Recipe data",function()
         if next(auto_by_station)~=nil or base_stats.needs_tick() then load_game_data() end
-        auto_eat.tick()
-        restore_automations()
-        refresh_button()
-        if next(auto_by_station) ~= nil then
-            clean_automations()
-            for _, automation in pairs(auto_by_station) do
+    end)
+    -- A menu/meal/statistics error must never starve every production station.
+    local restored=scan_job("Automation restore",restore_automations)
+    if restored and next(auto_by_station)~=nil then
+        for key, automation in pairs(auto_by_station) do
+            scan_job("Production",function()
+                local current=automation_state:valid(automation)
+                if current==false then
+                    auto_by_station[key]=nil
+                    automation_state.applied[key]=nil
+                    return
+                end
+                if not current then
+                    automation.status="Waiting for station"
+                    automation.retry_after=os.time()+5
+                    return
+                end
                 start_batch(automation)
-            end
+            end,function()
+                automation.status="Start request failed"
+                automation.retry_after=os.time()+15
+            end)
         end
+    end
+    scan_job("Workstation control",refresh_button)
+    scan_job("Automatic meals",auto_eat.tick)
+    scan_job("Base statistics",function()
         if base_stats.needs_tick() then
             base_stats.tick(recipe_products, recipe_product_counts,true)
         else
@@ -904,9 +1109,6 @@ local function scan()
         end
     end)
     is_scanning = false
-    if not ok_scan then
-        log("Scan stopped safely after an error: " .. tostring(err))
-    end
 end
 
 local function has_scan_work()
@@ -984,6 +1186,10 @@ if not config.enabled then
     log("Disabled in Scripts/config.lua.")
 else
     base_stats.configure({
+        get_batch_size=batch_size,
+        set_batch_size=function(row,count) return set_station_settings(row,count,nil) end,
+        get_stock_target=stock_target,
+        set_stock_target=function(row,target) return set_station_settings(row,nil,target) end,
         recipe_choices=recipe_choices,
         supply_check=supply_check,
         get_meals=function() return auto_eat.summary() end,
@@ -1007,15 +1213,29 @@ else
             if U.read(function() return player_controller():GetPalPlayerState():GetTechnologyData():IsUnlockCraftRecipe(FName(row.recipe_id)) end)~=true then
                 return false, "This recipe is not unlocked for your character."
             end
-            auto_by_station[key] = {station=row.station, recipe_id=row.recipe_id, product_id=recipe_products[row.recipe_id], status="Starting"}
+            auto_by_station[key] = {station=row.station, recipe_id=row.recipe_id, product_id=recipe_products[row.recipe_id], status="Starting",
+                batch_size=batch_size(row.station),stock_target=stock_target(row.station)}
             local saved,reason=save_automation(row.station,row.recipe_id,true)
             refresh_button()
+            station_changed(row.station,false)
             schedule_scan(250)
             return true, "Auto Produce enabled for " .. tostring(row.product) .. "."..(saved and "" or " "..reason)
         end,
         wake = function() schedule_scan(250) end,
     })
-    log("Loaded. Open Bases in the main menu or press F8. Built-in priorities and food forecasts are available in the overview.")
+    log("Loaded 0.1.0-beta.2. Batch limit="..config.batch_size..", scan interval="..config.scan_interval_ms.."ms. Open Bases or press F8.")
+
+    local fast_hooks=0
+    for _,event in ipairs(config.fast_refill and {{"OnFinishWorkInServer",true},{"OnUpdateContainerContentInServer",false},
+        {"OnRep_RemainProductNum",false},{"PickupProduct_ServerInternal",false}} or {}) do
+        local finished=event[2]
+        local ok,err=pcall(function()
+            RegisterHook("/Script/Pal.PalMapObjectConvertItemModel:"..event[1],function() end,
+                function(context) station_changed(context,finished) end)
+        end)
+        if ok then fast_hooks=fast_hooks+1 else log("Fast refill hook "..event[1].." unavailable; polling retained: "..tostring(err)) end
+    end
+    log("Fast refill notifications: "..fast_hooks.."/4. Polling fallback remains enabled.")
 
     local workspace_watch_ok, workspace_watch_error = pcall(function()
         NotifyOnNewObject(WORKSPACE_CLASS_PATH, function(candidate)

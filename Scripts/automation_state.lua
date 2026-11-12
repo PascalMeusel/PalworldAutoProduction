@@ -37,7 +37,17 @@ function M.new(path)
         return c
     end
     function self:has_saved() return next(self.store.records)~=nil end
-    function self:save(station,recipe,enabled)
+    function self:batch_size(station,default)
+        local id=identity(station,self.context)
+        local record=id and self.store.records[Store.key(id.world,id.guild,id.base,id.station)]
+        return record and record.batch_size or default
+    end
+    function self:stock_target(station)
+        local id=identity(station,self.context)
+        local record=id and self.store.records[Store.key(id.world,id.guild,id.base,id.station)]
+        return record and record.stock_target or 0
+    end
+    function self:save(station,recipe,enabled,batch_size,stock_target)
         local c=self:sync()
         local id=identity(station,c)
         if not id then
@@ -45,7 +55,7 @@ function M.new(path)
             return false,self.save_notice
         end
         self.save_notice=nil
-        local ok,err=self.store:set(id,recipe,enabled)
+        local ok,err=self.store:set(id,recipe,enabled,batch_size,stock_target)
         local address=U.address(station)
         local key=Store.key(id.world,id.guild,id.base,id.station)
         self.applied[address]=key
@@ -80,7 +90,7 @@ function M.new(path)
                     if r and data.can_edit_station(row) and products[r.recipe] and supports(station,r.recipe) and unlocked(r.recipe) then
                         data.select_recipe(row,{id=r.recipe,label=r.recipe,yield_count=1})
                         if r.enabled and not self.active[address] then
-                            self.active[address]={station=station,recipe_id=r.recipe,product_id=products[r.recipe],status="Resuming",identity=key}
+                            self.active[address]={station=station,recipe_id=r.recipe,product_id=products[r.recipe],status="Resuming",identity=key,batch_size=r.batch_size,stock_target=r.stock_target}
                             U.log("Restored AutoProduce for "..r.recipe..".")
                         end
                         self.applied[address]=key

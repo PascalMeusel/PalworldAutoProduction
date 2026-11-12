@@ -295,6 +295,28 @@ function M.build(snapshot, state, priorities)
                 or (filter=="Care" and "No Pal is reporting a care warning." or "No Pals match this activity.")
             text("nopals",empty,270,340,850,17,C.muted)
         end
+    elseif view=="Production" and state.batch and state.batch.base==c.id then
+        local b=state.batch
+        button("batch_back","Back to stations",1000,243,176,34,{kind="back_stations"}).size=11
+        text("batch_station",truncate(b.row.station_name or "Workstation",54),256,246,720,20)
+        text("batch_heading","Crafts per batch",256,299,850,20)
+        text("batch_help","Repeats automatically. A smaller batch uses fewer ingredients at once.",256,338,900,12,C.muted)
+        text("batch_value",count_label(b.count,"craft"),256,377,390,27,C.teal)
+        button("batch_minus","-",680,373,64,40,{kind="set_batch",delta=-1})
+        button("batch_plus","+",756,373,64,40,{kind="set_batch",delta=1})
+        for i,count in ipairs({1,5,10,25,50,100,500}) do
+            button("batch_preset"..i,tostring(count),256+(i-1)*128,431,116,34,{kind="set_batch",count=count},count==b.count).size=12
+        end
+        text("target_heading","Keep in base storage",256,491,850,20)
+        text("target_value",(b.target or 0)==0 and "Unlimited" or tostring(b.target).." items",256,532,390,24,C.teal)
+        button("target_minus","-",680,526,64,40,{kind="set_target",delta=-1})
+        button("target_plus","+",756,526,64,40,{kind="set_target",delta=1})
+        for i,target in ipairs({0,50,100,250,500,1000}) do
+            button("target_preset"..i,target==0 and "Unlimited" or tostring(target),256+(i-1)*150,581,138,34,
+                {kind="set_target",target=target},target==(b.target or 0)).size=12
+        end
+        text("batch_scope","Saved for this station. Stock targets count stored items and tracked automatic batches.",256,643,910,11,C.muted)
+        text("batch_partial","Current queues finish. Manual production or other mods can exceed the target.",256,666,910,11,C.muted)
     elseif view=="Production" and state.plan and state.plan.base==c.id then
         local p=state.plan
         text("plan_title",truncate(p.product.." supplies",41),256,242,650,21)
@@ -391,8 +413,12 @@ function M.build(snapshot, state, priorities)
             stat.tooltip=p.status
             if inspect then button("supplies"..index,"Supplies",720,y+33,68,26,{kind="supplies",station=p}).size=10 end
             if p.recipe_id~="" and (p.auto or c.here) then
-                local b=button("auto"..index,p.auto and "ON / Pause" or "OFF / Enable",1028,y+15,118,34,{kind="auto",station=p},false)
+                local b=button("auto"..index,p.auto and "ON / Pause" or "OFF / Enable",1028,y+3,118,28,{kind="auto",station=p},false)
                 b.size=11;b.ink=p.auto and C.green or C.muted
+                if c.here then
+                    button("batch"..index,"Batch: "..tostring(p.batch_size or 10),1028,y+35,118,26,{kind="batch",station=p},false,
+                        "Set batch size and an optional base stock target.").size=10
+                end
             elseif c.here and p.remaining==0 then
                 button("choose_station"..index,"Choose recipe",1028,y+15,118,34,{kind="recipes",station=p}).size=11
             else text("prodemptynote"..index,"Visit station",1028,y+23,122,10,C.muted) end
@@ -435,7 +461,7 @@ function M.build(snapshot, state, priorities)
         parent=nil
     end
     local count=view=="Production" and #c.producers or #c.pals
-    if view~="Overview" and not (view=="Production" and ((state.picker and state.picker.base==c.id) or (state.plan and state.plan.base==c.id))) then
+    if view~="Overview" and not (view=="Production" and ((state.picker and state.picker.base==c.id) or (state.plan and state.plan.base==c.id) or (state.batch and state.batch.base==c.id))) then
         text("listinfo",(shown_count and filter~="All" and (shown_count.." of ") or "")..count_label(count,view=="Production" and "station" or "Pal").." in this base",256,661,430,11,C.muted)
         local overflow=(shown_count or count)*(view=="Pals" and 64 or view=="Production" and 68 or 42)-4>(view=="Priorities" and 251 or 344)
         text("scrollhint",overflow and "Scroll to browse" or "All entries shown",1000,661,176,11,C.muted)

@@ -2,8 +2,12 @@
 return {
     ENABLED = true,
 
-    -- Crafts queued per batch while AutoProduce is enabled for a station.
+    -- Default crafts per batch. Override per station in Bases > Production.
     BATCH_SIZE = 10,
+
+    -- Coalesced production/pickup notifications supplement normal polling.
+    -- Set false to compare performance or troubleshoot a game/loader build.
+    FAST_REFILL = true,
 
     -- Refill check interval while at least one AutoProduce station is enabled.
     -- Food tracking and AFK meals use lightweight checks every five seconds.

@@ -42,6 +42,21 @@ eq(s:set(id,"Cake",false),false);eq(Store.new(path).records[key].recipe,"Salad")
 io.open=open;eq(s:save(),true);eq(Store.new(path).records[key].recipe,"Cake")
 clean()
 
+-- Version 1 choices migrate without changing ON/OFF or inventing a stock cap.
+s=Store.new(path);eq(s:set(id,"Salad",true),true)
+local legacy=bytes(""):gsub("PAPA\t2\n","PAPA\t1\n"):gsub("(\t[01])\t0\t0\n","%1\n")
+write("",legacy);s=Store.new(path)
+eq(s.records[key].enabled,true);eq(s.records[key].batch_size,nil);eq(s.records[key].stock_target,0)
+eq(s:set(id,"Salad",true,1,100),true)
+s=Store.new(path);eq(s.records[key].batch_size,1);eq(s.records[key].stock_target,100)
+eq(s:set(id,"Salad",false),true);eq(s.records[key].batch_size,1);eq(s.records[key].stock_target,100)
+eq(s:set(id,"Salad",true,10),true);eq(s.records[key].stock_target,100)
+eq(s:set(id,"Cake",false),true);eq(s.records[key].stock_target,0);eq(s.records[key].batch_size,10)
+eq(s:set(id,"Cake",false,0),false);eq(s:set(id,"Cake",false,1.5),false)
+eq(s:set(id,"Cake",false,nil,-1),false);eq(s:set(id,"Cake",false,nil,math.huge),false)
+eq(s:set(id,"Cake",false,nil,0/0),false);eq(s:set(id,"Cake",false,nil,1000000),false)
+clean()
+
 -- Use real scope resolution and real base ownership checks with native-shaped
 -- objects, a different address on every reload, and an actual data file.
 local U=require("ap_util")

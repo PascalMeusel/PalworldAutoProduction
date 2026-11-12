@@ -2,7 +2,7 @@
   "ModName": "AutoProduction: Bases (Beta)",
   "PackageName": "PalworldAutoProduction",
   "Thumbnail": "thumbnail.png",
-  "Version": "0.1.0-beta.1",
+  "Version": "0.1.0-beta.2",
   "DebugMode": false,
   "Author": "PascalMeusel",
   "Dependencies": ["UE4SSExperimentalPW"],

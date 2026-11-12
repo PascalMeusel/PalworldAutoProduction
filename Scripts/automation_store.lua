@@ -16,24 +16,34 @@ end
 local function encode(records)
     local lines={}
     for _,r in pairs(records) do
-        lines[#lines+1]=table.concat({hex(r.world),hex(r.guild),hex(r.base),hex(r.station),hex(r.recipe),r.enabled and "1" or "0"},"\t")
+        lines[#lines+1]=table.concat({hex(r.world),hex(r.guild),hex(r.base),hex(r.station),hex(r.recipe),r.enabled and "1" or "0",r.batch_size or 0,r.stock_target or 0},"\t")
     end
     table.sort(lines)
     -- A required footer/count detects truncated writes, including at line boundaries.
-    return "PAPA\t1\n"..(#lines>0 and table.concat(lines,"\n").."\n" or "").."END\t"..#lines.."\n"
+    return "PAPA\t2\n"..(#lines>0 and table.concat(lines,"\n").."\n" or "").."END\t"..#lines.."\n"
 end
 local function decode(text)
     if type(text)~="string" then return end
-    local body,count=text:match("^PAPA\t1\n(.*)END\t(%d+)\n$")
+    local version,body,count=text:match("^PAPA\t([12])\n(.*)END\t(%d+)\n$")
     if not body then return end
     local records,n={},0
     for line in body:gmatch("([^\n]*)\n") do
+        local batch,target
+        if version=="2" then
+            line,target=line:match("^(.*)\t(%d+)$")
+            target=tonumber(target)
+            if not line or not target or target>999999 then return end
+            line,batch=line:match("^(.*)\t(%d+)$")
+            batch=tonumber(batch)
+            if not line or not batch or batch>9999 then return end
+            if batch==0 then batch=nil end -- use config default, including migrated v1
+        end
         local w,g,b,s,r,on=line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([01])$")
         if not w then return end
         w,g,b,s,r=unhex(w),unhex(g),unhex(b),unhex(s),unhex(r)
         local key=M.key(w,g,b,s)
         if not key or not r or r=="None" or records[key] then return end
-        records[key]={world=w,guild=g,base=b,station=s,recipe=r,enabled=on=="1"};n=n+1
+        records[key]={world=w,guild=g,base=b,station=s,recipe=r,enabled=on=="1",batch_size=batch,stock_target=target or 0};n=n+1
     end
     if n~=tonumber(count) or (body~="" and body:sub(-1)~="\n") then return end
     return records
@@ -82,12 +92,19 @@ function M.new(path)
         self.dirty,self.error,self.recovered=false,nil,nil
         return true
     end
-    function self:set(identity,recipe,enabled)
+    function self:set(identity,recipe,enabled,batch_size,stock_target)
         local key=M.key(identity.world,identity.guild,identity.base,identity.station)
         if not key or not field(recipe) or recipe=="None" or type(enabled)~="boolean" then return false,"Invalid automation setting" end
         local old=self.records[key]
-        if not old or old.recipe~=recipe or old.enabled~=enabled then
-            self.records[key]={world=identity.world,guild=identity.guild,base=identity.base,station=identity.station,recipe=recipe,enabled=enabled}
+        if batch_size~=nil and (type(batch_size)~="number" or batch_size~=batch_size
+            or batch_size<1 or batch_size>9999 or batch_size%1~=0) then return false,"Invalid batch size" end
+        batch_size=batch_size or (old and old.batch_size)
+        if stock_target~=nil and (type(stock_target)~="number" or stock_target~=stock_target
+            or stock_target<0 or stock_target>999999 or stock_target%1~=0) then return false,"Invalid stock target" end
+        -- A new product must not inherit another product's stock target.
+        stock_target=stock_target or (old and old.recipe==recipe and old.stock_target) or 0
+        if not old or old.recipe~=recipe or old.enabled~=enabled or old.batch_size~=batch_size or old.stock_target~=stock_target then
+            self.records[key]={world=identity.world,guild=identity.guild,base=identity.base,station=identity.station,recipe=recipe,enabled=enabled,batch_size=batch_size,stock_target=stock_target}
             self.dirty=true
         end
         return self:save(),self.error

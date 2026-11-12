@@ -20,4 +20,5 @@ workshop_path.txt
 /docs/*
 !/docs/development.md
 !/docs/workshop.md
+!/docs/testing.md
 !/docs/*-preview.png

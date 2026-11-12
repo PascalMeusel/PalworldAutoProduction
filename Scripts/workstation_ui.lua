@@ -39,6 +39,7 @@ local function replace(parent,old,new)
     local following={}
     for i=index,parent:GetChildrenCount()-1 do
         local child=parent:GetChildAt(i)
+        assert(U.valid(child),"transport sibling is no longer live")
         following[#following+1]={child=child,layout=slot_layout(child.Slot)}
     end
     for _,entry in ipairs(following) do parent:RemoveChild(entry.child) end
@@ -73,7 +74,9 @@ local function click_function(cls)
     end
 end
 function M.reset()
-    if U.valid(M.wrapper) and U.valid(M.original) and U.valid(M.parent) then
+    if U.valid(M.owner) and U.valid(M.wrapper) and U.valid(M.original) and U.valid(M.parent)
+        and U.address(U.read(function() return M.wrapper:GetParent() end))==U.address(M.parent)
+        and U.address(U.read(function() return M.original:GetParent() end))==U.address(M.wrapper) then
         local ok,err=pcall(function()
             M.original:RemoveFromParent()
             replace(M.parent,M.wrapper,M.original)
@@ -150,8 +153,9 @@ function M.attach(owner,on_click)
     if not ok then M.reset();return nil,tostring(err) end
     return M.root,M.label
 end
-function M.refresh(enabled,has_recipe,recipe,save_warning)
-    if not U.valid(M.root) then return end
+function M.refresh(enabled,has_recipe,recipe,save_warning,status)
+    if not U.visible(M.owner) or not U.valid(M.root) or not U.valid(M.label)
+        or not U.valid(M.check) or not U.valid(M.button) then return end
     local text=StaticFindObject("/Script/Engine.Default__KismetTextLibrary")
     M.label:SetText(text:Conv_StringToText(enabled and "Auto Produce: ON" or "Auto Produce: OFF"))
     M.label:SetColorAndOpacity({SpecifiedColor=enabled
@@ -161,7 +165,8 @@ function M.refresh(enabled,has_recipe,recipe,save_warning)
     M.button:SetIsEnabled(enabled or has_recipe)
     M.root:SetRenderOpacity((enabled or has_recipe) and 1 or 0.55)
     M.button:SetToolTipText(text:Conv_StringToText(save_warning or (enabled
-        and ("Repeating "..tostring(recipe or "the saved recipe")..". Pause before choosing a different recipe. Saved across world restarts.")
+        and ("Repeating "..tostring(recipe or "the saved recipe")..". "..tostring(status or "Starting")
+            ..". Refills batches automatically; ten is not a total limit. Pause before changing recipe. Saved across world restarts.")
         or "Repeat the selected recipe while ingredients are available. Your choice is saved across world restarts.")))
 end
 return M

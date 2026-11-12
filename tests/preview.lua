@@ -31,4 +31,5 @@ local plan={at=600,base="preview",key="3",product="Salad",recipe="Salad",station
     craftable=405,yield_count=1,rate=6,materials={{id="Lettuce",name="Lettuce",base=845,bag=0,cost=2},
     {id="Tomato",name="Tomato",base=810,bag=0,cost=2}}}
 require("base_insights").supply_outlook(plan)
-return {snapshot={at=600,camps={camp,other}},priorities=store,picker=picker,plan=plan}
+return {snapshot={at=600,camps={camp,other}},priorities=store,picker=picker,plan=plan,
+    batch={base="preview",row=camp.producers[3],count=10,target=100}}

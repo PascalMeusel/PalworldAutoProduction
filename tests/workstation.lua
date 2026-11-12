@@ -74,7 +74,7 @@ Key={LEFT_MOUSE_BUTTON=1,RIGHT_MOUSE_BUTTON=2,F8=3,ESCAPE=4}
 local keybinds={}
 function RegisterKeyBind(key,fn) keybinds[key]=fn end
 local hooks,watched,delayed,game={}, {}, {}, {}
-function RegisterHook(path,fn) hooks[path]=fn end
+function RegisterHook(path,fn,post) hooks[path]=post or fn end
 function NotifyOnNewObject(path,fn) watched[path]=fn end
 function ExecuteWithDelay() error("Native timers should not cross the async thread") end
 function ExecuteInGameThreadWithDelay(ms,fn) delayed[#delayed+1]=fn;return #delayed end
@@ -98,8 +98,17 @@ local starts,blocked,before,after=0,0,0,0
 local clock=100;os.time=function() return clock end
 local scheduler=object({ProductSettingModel=object()})
 local asynchronous=false
-function scheduler:Initialize(station) self.station=station end
-function scheduler.ProductSettingModel:SelectRecipe(recipe) self.recipe=recipe end
+local craftable=100
+local created_models={}
+function scheduler:Initialize(station)
+    assert(not rawget(self,"station"),"Native model rebound across requests")
+    self.station=station
+end
+function scheduler:TryGetConcreteModel(out) out.Model=self.wrong_station or self.station;return true end
+function scheduler.ProductSettingModel:SelectRecipe(recipe) self.recipe=self.wrong_recipe or recipe end
+function scheduler.ProductSettingModel:GetRecipeId() return self.recipe end
+function scheduler.ProductSettingModel:CalcMaxProductableNum() return craftable end
+function scheduler.ProductSettingModel:GetProductNum() return self.count end
 function scheduler.ProductSettingModel:SetProductNumByInput(count) self.count=count end
 function scheduler:UpdateProductSetting_TransportToStorage(on) eq(on,true) end
 function scheduler:CanStartProduction() return blocked end
@@ -123,8 +132,14 @@ function StaticFindObject(path)
     if path=="/Script/UMG.Default__WidgetBlueprintLibrary" then return library end
     return assert(classes[path:match("/Script/UMG%.(.+)")],path)
 end
-function StaticConstructObject(class)
-    if class==scheduler_class then return scheduler end
+function StaticConstructObject(class,outer,...)
+    if class==scheduler_class then
+        eq(select("#",...),0) -- No forced native/async/root flags.
+        local model=setmetatable(object(),{__index=scheduler})
+        model.ProductSettingModel=setmetatable(object(),{__index=scheduler.ProductSettingModel})
+        created_models[#created_models+1]=model
+        return model
+    end
     return object({Font={},class=class})
 end
 local item_utility=object({CountLocalPlayerInsideBaseCampItemNum64=function(_,_,f) return f=="Lettuce" and 15 or 6 end,
@@ -168,6 +183,8 @@ local function window(parent_kind)
     function station:GetRecipes() return {"Salad"} end
     function station:GetRemainCreateNum() return self.remaining end
     function station:GetCurrentRecipeId() return self.recipe end
+    local output=object({GetStackCount=function() return station.output or 0 end})
+    function station:GetProductSlot() return output end
     local selected="None"
     local model=object({ProductSettingModel=object()})
     function model.ProductSettingModel:GetRecipeId() return selected end
@@ -232,7 +249,7 @@ here=false;eq(options.recipe_choices(row,"Salad"),nil);eq(row.recipe_id,nil)
 here=true;unlocked=false;eq(options.recipe_choices(row,"Salad"),nil)
 unlocked=true;eq(options.recipe_choices(row,"Salad"),true);eq(row.recipe_id,"Salad");eq(starts,2)
 function scheduler.ProductSettingModel:GetRecipeId() return self.recipe end
-function scheduler.ProductSettingModel:CalcMaxProductableNum() return 3 end
+craftable=3
 function scheduler.ProductSettingModel:GetRequiredMaterialInfos(out,one)
     eq(one,true);out[1]={StaticItemId="Lettuce",Num=2};out[2]={StaticItemId="Tomato",Num=2}
 end
@@ -240,6 +257,7 @@ local plan=options.supply_check(row)
 eq(plan.craftable,3);eq(plan.materials[1].base,15);eq(plan.materials[1].bag,1)
 eq(plan.materials[1].crafts,8);eq(plan.materials[2].limiting,true);eq(plan.coverage,3)
 eq(starts,2);eq(station.remaining,0)
+craftable=100
 here=false;eq(options.supply_check(row),nil);eq(options.set_automation(row),false)
 here=true;unlocked=false;eq(options.set_automation(row),false)
 unlocked=true;station.remaining=1;eq(options.recipe_choices(row,"Salad"),nil)
@@ -279,5 +297,201 @@ eq(disk.store.records[record].recipe,"Salad")
 -- A complete reload keeps OFF even if its last queue is empty.
 delayed={};game={};package.loaded.main=nil;require("main")
 clock=330;flush_delayed();eq(options.get_automation(tostring(restart_station.address)),nil);eq(starts,6)
+
+-- Workshop report regression: ten is a batch, never a total production cap.
+local a=restart_station
+local r={key=tostring(a.address),station=a,recipe_id="Salad",product="Salad"}
+local function advance(seconds) clock=clock+(seconds or 6);flush_delayed() end
+local function status() return options.get_automation(r.key).status end
+eq(options.set_automation(r),true);advance();eq(a.remaining,10)
+local completed=starts
+for i=1,20 do
+    a.remaining=0
+    -- Native garbage collection between requests must not leave a reused model.
+    for _,model in ipairs(created_models) do model.valid=false;model.ProductSettingModel.valid=false end
+    local read_only=starts
+    local supplies=options.supply_check(r)
+    eq(supplies.craftable,100);eq(starts,read_only)
+    advance();eq(a.remaining,10);eq(starts,completed+i)
+end
+local expected=starts
+-- Recipe discovery may briefly be empty or fail after a batch/streaming update.
+local recipes=a.GetRecipes
+a.remaining=0;a.GetRecipes=function() return {} end
+advance();eq(status(),"Recipe unavailable");eq(starts,expected)
+eq(options.get_automation(r.key)~=nil,true)
+a.GetRecipes=function() error("replication is not ready") end
+advance();eq(status(),"Recipe unavailable");eq(starts,expected)
+a.GetRecipes=recipes;advance();expected=expected+1
+eq(starts,expected);eq(a.remaining,10)
+-- Use the remaining materials even when less than a full batch is craftable.
+a.remaining=0;craftable=3;advance();expected=expected+1
+eq(starts,expected);eq(a.remaining,3)
+a.remaining=0;craftable=0;advance();eq(status(),"Waiting for resources");eq(starts,expected)
+craftable=nil;advance();eq(status(),"Supplies unavailable");eq(starts,expected)
+craftable=100;advance();expected=expected+1;eq(a.remaining,10);eq(starts,expected)
+-- Leaving an owned base keeps ON but does not spend the wrong base's supplies.
+a.remaining=0;here=false;advance();eq(status(),"Visit base to resume");eq(starts,expected)
+here=true;advance();expected=expected+1;eq(starts,expected)
+-- A partial initialization or changed native recipe never starts another recipe.
+a.remaining=0;scheduler.wrong_station=station
+advance();eq(status(),"Waiting for station");eq(starts,expected)
+scheduler.wrong_station=nil;scheduler.ProductSettingModel.wrong_recipe="Cake"
+advance();eq(status(),"Recipe not selected");eq(starts,expected)
+scheduler.ProductSettingModel.wrong_recipe=nil
+local get_count=scheduler.ProductSettingModel.GetProductNum
+scheduler.ProductSettingModel.GetProductNum=function() return -1 end
+advance();eq(status(),"Recipe not selected");eq(starts,expected)
+scheduler.ProductSettingModel.GetProductNum=get_count
+advance();expected=expected+1;eq(starts,expected)
+-- Failures in menu, meals and statistics are independent of automatic refills.
+watched[workspace_path](restart_owner);flush_delayed()
+local refresh=ui.refresh
+ui.refresh=function() error("UI child destroyed") end
+local eat=require("auto_eat");local meal_tick=eat.tick
+eat.tick=function() error("meal data temporarily unavailable") end
+local food_tick=data.sample_current_food
+data.sample_current_food=function() error("feed box temporarily unavailable") end
+a.remaining=0;advance();expected=expected+1;eq(starts,expected);eq(a.remaining,10)
+ui.refresh=refresh;eat.tick=meal_tick;data.sample_current_food=food_tick
+-- A bad station cannot block a healthy station, regardless of table iteration order.
+local _,_,b=window()
+local rb={key=tostring(b.address),station=b,recipe_id="Salad",product="Salad"}
+eq(options.set_automation(rb),true)
+local observe=require("base_stats").observe_automation
+require("base_stats").observe_automation=function(key,...)
+    if key==rb.key then error("bad station telemetry") end
+    return observe(key,...)
+end
+a.remaining=0;advance();expected=expected+1;eq(starts,expected);eq(b.remaining,0)
+eq(options.get_automation(rb.key).status,"Start request failed")
+require("base_stats").observe_automation=observe
+advance(16);expected=expected+1;eq(starts,expected);eq(b.remaining,10)
+eq(options.set_automation(rb),true);eq(options.set_automation(r),true)
+
+-- Batch settings are independent per station, save immediately, and never
+-- start a paused station or replace work that the game already accepted.
+local no_start=starts
+eq(options.set_batch_size(r,1),true);eq(options.get_batch_size(a),1)
+eq(options.get_batch_size(b),10);eq(starts,no_start);eq(a.remaining,10)
+eq(options.set_batch_size(r,0),false);eq(options.set_batch_size(r,1.5),false)
+here=false;eq(options.set_batch_size(r,5),false);here=true
+a.remaining=0;eq(options.set_automation(r),true);advance();eq(a.remaining,1)
+eq(options.set_batch_size(r,10),true);eq(a.remaining,1)
+eq(options.set_batch_size(r,1),true)
+local finish=hooks["/Script/Pal.PalMapObjectConvertItemModel:OnFinishWorkInServer"]
+local pickup=hooks["/Script/Pal.PalMapObjectConvertItemModel:OnUpdateContainerContentInServer"]
+local function event_only(fn,station)
+    local n=#delayed
+    fn(context(station))
+    eq(#delayed,n+1)
+    local run=table.remove(delayed)
+    run();flush_game()
+end
+-- Complete + collect: the event starts the next one-craft batch before the
+-- periodic scan runs. Uncollected output gets a useful status and no request.
+a.remaining=0;clock=clock+1;no_start=starts
+event_only(finish,a);eq(starts,no_start+1);eq(a.remaining,1)
+a.remaining=0;a.output=1;clock=clock+1;no_start=starts
+event_only(finish,a);eq(status(),"Waiting for pickup");eq(starts,no_start)
+a.output=0;clock=clock+1
+event_only(pickup,a);eq(starts,no_start+1)
+-- 1,000 notifications coalesce into ONE deferred pass; no queue or inventory
+-- queries, UI refreshes, food reads or full scans happen in the hook itself.
+local queue_read=a.GetRemainCreateNum;local reads=0
+a.GetRemainCreateNum=function(self) reads=reads+1;return queue_read(self) end
+a.remaining=0;clock=clock+1
+local timers,meals_before=#delayed,food_checks
+for _=1,1000 do pickup(context(a)) end
+eq(#delayed,timers+1);eq(reads,0);eq(food_checks,meals_before)
+local event_run=table.remove(delayed);no_start=starts;event_run()
+eq(starts,no_start+1);eq(food_checks,meals_before)
+a.GetRemainCreateNum=queue_read
+-- Requests rejected by the game retain their backoff even under event floods.
+a.remaining=0;clock=clock+1;blocked=4;no_start=starts
+event_only(finish,a);eq(status(),"Waiting for resources");eq(starts,no_start)
+clock=clock+1;event_only(pickup,a);eq(starts,no_start)
+blocked=0;advance(6);eq(starts,no_start+1)
+-- A very fast accepted batch can finish before the next poll observes it.
+asynchronous=true;a.remaining=0;clock=clock+2
+event_only(finish,a);eq(status(),"Confirming queue")
+a.output=1;clock=clock+1;no_start=starts
+event_only(finish,a);eq(status(),"Waiting for pickup");eq(starts,no_start)
+a.output=0;clock=clock+1;event_only(pickup,a);eq(starts,no_start+1)
+eq(options.set_automation(r),true);asynchronous=false
+
+-- Shared targets reserve in-flight batches, including unacknowledged RPCs.
+eq(options.set_batch_size(r,10),true);eq(options.set_stock_target(r,15),true)
+eq(options.set_stock_target(rb,15),true)
+a.remaining=0;b.remaining=0;a.output=0;b.output=0
+local count_stock=item_utility.CountLocalPlayerInsideBaseCampItemNum64
+local stock_reads,stock=0,0
+item_utility.CountLocalPlayerInsideBaseCampItemNum64=function(self,pc,id)
+    if id=="Salad" then stock_reads=stock_reads+1;return stock end
+    return count_stock(self,pc,id)
+end
+clock=clock+2;asynchronous=true
+eq(options.set_automation(r),true);eq(options.set_automation(rb),true)
+local shared=table.remove(delayed);no_start=starts;shared()
+eq(starts,no_start+2);eq(stock_reads,1)
+local aa,ab=options.get_automation(r.key),options.get_automation(rb.key)
+eq(aa.request_count+ab.request_count,15)
+a.remaining=aa.request_count;b.remaining=ab.request_count
+advance();eq(starts,no_start+2)
+a.remaining=0;b.remaining=0;stock=15;advance()
+eq(starts,no_start+2);eq(status(),"Stock target reached")
+stock=14;asynchronous=false;advance();eq(starts,no_start+3);eq(a.remaining+b.remaining,1)
+eq(options.set_automation(r),true);eq(options.set_automation(rb),true)
+-- An unreadable inventory must never be interpreted as empty storage.
+a.remaining=0;b.remaining=0;stock=nil;eq(options.set_automation(r),true)
+advance();eq(status(),"Stock check unavailable");eq(starts,no_start+3)
+stock=0;advance();eq(a.remaining,10)
+eq(options.set_automation(r),true)
+eq(options.set_stock_target(r,0),true);eq(options.get_stock_target(a),0)
+item_utility.CountLocalPlayerInsideBaseCampItemNum64=count_stock
+-- A queued notification cannot re-enable an explicitly paused automation.
+a.remaining=0;clock=clock+2;eq(options.set_automation(r),true)
+local cancelled=table.remove(delayed);eq(options.set_automation(r),true)
+no_start=starts;cancelled();eq(starts,no_start)
+print("PASS Saved station batches, event-driven refill, notification flood bound, pickup waits and shared stock targets")
+-- BeginDestroy objects still report IsValid on some bridges. No widget calls
+-- or hierarchy surgery are permitted once the owner starts destruction.
+EObjectFlags={RF_BeginDestroyed=0x8000,RF_FinishDestroyed=0x10000}
+function restart_owner:HasAnyFlags(mask) return self.destroying and mask==0x18000 end
+local label=ui.label;local set_text=label.SetText
+label.SetText=function() error("destroyed widget was touched") end
+restart_owner.destroying=true
+eq(require("ap_util").valid(restart_owner),false)
+ui.refresh(true,true,"Salad");ui.reset();eq(ui.owner,nil)
+label.SetText=set_text
+EObjectFlags=nil
+-- Multi-item yields and pending requests must reserve output items, even when
+-- the native recipe ID has not replicated yet. Reload exercises saved settings.
+eq(options.set_batch_size(r,1),true);eq(options.set_stock_target(r,6),true)
+eq(options.set_stock_target(rb,6),true)
+function recipe_access:BP_FindRow(id,out) out.bResult=id=="Salad";return {Product_Id=id,Product_Count=3} end
+item_utility.CountLocalPlayerInsideBaseCampItemNum64=function() return 0 end
+delayed={};game={};data.objects={[r.key]=a,[rb.key]=b}
+package.loaded.main=nil;require("main")
+advance()
+eq(options.get_batch_size(a),1);eq(options.get_stock_target(a),6)
+a.remaining=0;b.remaining=0;a.recipe="None";b.recipe="None";asynchronous=true
+clock=clock+10;eq(options.set_automation(r),true)
+local first_request=table.remove(delayed);no_start=starts;first_request();eq(starts,no_start+1)
+eq(options.get_automation(r.key).request_count,1)
+clock=clock+1;eq(options.set_automation(rb),true)
+local second_request=table.remove(delayed);second_request();eq(starts,no_start+2)
+eq(options.get_automation(rb.key).request_count,1) -- Three items already reserved by the first request.
+-- Transient identity failures keep ON while preventing native starts.
+local identity=a.GetInstanceId
+a.GetInstanceId=function() error("identity not replicated") end
+advance();eq(options.get_automation(r.key)~=nil,true);eq(options.get_automation(r.key).status,"Waiting for station")
+a.GetInstanceId=identity
+eq(options.set_automation(r),true);eq(options.set_automation(rb),true)
+-- A queued event cannot carry an automation into a different world/session.
+clock=clock+10;eq(options.set_automation(r),true)
+local old_event=table.remove(delayed);world="Different world";no_start=starts
+old_event();eq(starts,no_start);eq(options.get_automation(r.key),nil)
+print("PASS Repeated batches, partial batches, missing data recovery, model isolation, independent failures and native destruction guards")
 for _,suffix in ipairs({"",".bak",".tmp"}) do os.remove(save_path..suffix) end
 print(string.format("PASS Native workstation layout, recipe selection, supplies, delayed queue confirmation and production refills; %d assertions",checks))

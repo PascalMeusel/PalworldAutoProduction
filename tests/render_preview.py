@@ -11,10 +11,11 @@ fixture=lua.execute((root/'tests/preview.lua').read_text(encoding='utf-8'))
 scene=lua.eval("require('overview_scene')")[0]
 dest=root/'docs';dest.mkdir(exist_ok=True)
 overflows=[]
-for view,mode in (('Overview','Status'),('Overview','Trends'),('Overview','Stores'),('Pals',None),('Production',None),('Production','Recipes'),('Production','Supplies'),('Priorities',None)):
+for view,mode in (('Overview','Status'),('Overview','Trends'),('Overview','Stores'),('Pals',None),('Production',None),('Production','Recipes'),('Production','Supplies'),('Production','Settings'),('Priorities',None)):
     state=lua.table_from({'view':view,'base':'preview','overview_mode':mode})
     if mode=='Recipes': state.picker=fixture.picker
     if mode=='Supplies': state.plan=fixture.plan
+    if mode=='Settings': state.batch=fixture.batch
     nodes=scene.build(fixture.snapshot,state,fixture.priorities)
     im=Image.new('RGB',(1200,760),'#0B1C29');draw=ImageDraw.Draw(im)
     draw.text((20,730),'Example data  /  Bases dashboard layout',font=ImageFont.truetype('C:/Windows/Fonts/segoeui.ttf',15),fill='#A9C1D0')
@@ -48,8 +49,8 @@ for view,mode in (('Overview','Status'),('Overview','Trends'),('Overview','Store
             crop=target.crop(bounds)
             im.paste(crop,bounds,crop)
             draw=ImageDraw.Draw(im)
-    name=mode.lower() if mode in ('Trends','Stores','Recipes','Supplies') else view.lower()
+    name=mode.lower() if mode in ('Trends','Stores','Recipes','Supplies','Settings') else view.lower()
     im.save(dest/(name+'-preview.png'))
-print('Rendered eight scene previews')
+print('Rendered nine scene previews')
 for item in overflows:print('TEXT OVERFLOW',item)
 if overflows:sys.exit(1)

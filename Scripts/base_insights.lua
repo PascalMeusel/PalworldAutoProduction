@@ -4,7 +4,9 @@ local M={}
 function M.count(n,one,many) return n.." "..(n==1 and one or (many or one.."s")) end
 local blocked={["Waiting for resources"]=true,["Waiting for power"]=true,["Power unit unavailable"]=true,
     ["Start request failed"]=true,["Recipe not selected"]=true,["Station unavailable"]=true,["No queue confirmation"]=true,
-    ["Waiting for station"]=true,["Queue unavailable"]=true,["Start blocked by game"]=true}
+    ["Waiting for station"]=true,["Queue unavailable"]=true,["Start blocked by game"]=true,
+    ["Supplies unavailable"]=true,["Visit base to resume"]=true,["Waiting for recipe unlock"]=true,
+    ["Waiting for pickup"]=true,["Output unavailable"]=true,["Stock check unavailable"]=true}
 function M.blocked(row) return row.auto==true and blocked[row.status]==true end
 function M.care_readable(p)
     return p.health~=nil and p.food~=nil and p.sanity~=nil and p.dead~=nil and p.sick~=nil

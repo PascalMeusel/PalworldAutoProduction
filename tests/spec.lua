@@ -401,8 +401,10 @@ test("Loaded guild data, pre-existing objects, weighted food and stable Pal IDs"
 end)
 test("All dashboard views have unique IDs, bounded geometry and real controls",function()
     local scene=require("overview_scene")
-    for _,view in ipairs({"Overview","Trends","Stores","Pals","Production","Priorities"}) do
-        local nodes=scene.build(fixture,{view=(view=="Trends" or view=="Stores") and "Overview" or view,overview_mode=view},{bases={},status="Ready"})
+    for _,view in ipairs({"Overview","Trends","Stores","Pals","Production","Priorities","Settings"}) do
+        local settings=view=="Settings"
+        local nodes=scene.build(fixture,{view=settings and "Production" or ((view=="Trends" or view=="Stores") and "Overview" or view),overview_mode=view,
+            batch=settings and {base=fixture.camps[1].id,row={station_name="Electric Kitchen"},count=9999,target=999999} or nil},{bases={},status="Ready"})
         local ids,areas={},{};local buttons=0
         for _,n in ipairs(nodes) do
             eq(ids[n.id],nil,"duplicate node");ids[n.id]=true

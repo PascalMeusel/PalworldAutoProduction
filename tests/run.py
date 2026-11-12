@@ -11,7 +11,7 @@ for p in (root / 'Scripts').glob('*.lua'):
     assert ok, err
 print('All Lua modules parse under Lua 5.4')
 lua.execute((root / 'tests' / 'spec.lua').read_text(encoding='utf-8'))
-for suite in ('native_tab.lua', 'workstation.lua', 'auto_eat.lua', 'automation.lua'):
+for suite in ('native_tab.lua', 'workstation.lua', 'auto_eat.lua', 'automation.lua', 'production_controls.lua'):
     native = LuaRuntime(unpack_returned_tuples=True)
     native.execute("package.path = '" + root.as_posix() + "/Scripts/?.lua;' .. package.path")
     native.execute((root / 'tests' / suite).read_text(encoding='utf-8'))

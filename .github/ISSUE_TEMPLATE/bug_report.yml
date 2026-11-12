@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a crash, stopped production, or incorrect base data.
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: Game, UE4SS and AutoProduction versions
+      description: Include the loader build/commit if available, and Steam Workshop or manual installation.
+    validations:
+      required: true
+  - type: dropdown
+    id: session
+    attributes:
+      label: Session type
+      options:
+        - Single-player
+        - Co-op host
+        - Joining a co-op host
+        - Dedicated server client
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What happened and how to reproduce
+      description: For production, include the station, recipe, batch size, stock target, displayed status, whether output had been collected, and whether you were still in that base.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log or crash details
+      description: Include the last AutoProduction lines from UE4SS.log and the crash call stack if available. Redact private paths or addresses; do not upload saves. A screenshot alone cannot establish a crash cause.
+  - type: textarea
+    id: other_mods
+    attributes:
+      label: Other mods and installation details
+      description: Mention other production/priority mods and whether both manual and Workshop UE4SS copies are installed.

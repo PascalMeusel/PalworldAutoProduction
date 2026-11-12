@@ -1,6 +1,6 @@
 # Steam Workshop packaging
 
-**Status: draft package, not published or validated through the Workshop loader.** The current downloadable beta uses the manual UE4SS installation path.
+**Status: beta.1 uploaded by the author; beta.2 is an untested native candidate.** The existing item is [AutoProduction: Bases](https://steamcommunity.com/sharedfiles/filedetails/?id=3837541491). Local packaging does not publish an update. Validate the candidate through the Workshop loader before uploading.
 
 Pocketpair's official loader supports [Lua (UE4SS) mods](https://github.com/pocketpairjp/PalworldModUploader/blob/main/PalworldModUploader/docs/en/01-General.md). A Lua package uses an `Info.json` and `Scripts` directory; its install rule places files under `Mods/NativeMods/UE4SS/Mods/{PackageName}`. See the official [package format](https://github.com/pocketpairjp/PalworldModUploader/blob/main/PalworldModUploader/docs/en/02-Package.md) and [installation rules](https://github.com/pocketpairjp/PalworldModUploader/blob/main/PalworldModUploader/docs/en/04-Tech.md).
 
@@ -22,4 +22,4 @@ This creates `releases/PalworldAutoProduction-Workshop-draft.zip` with root-leve
 5. Check installation, enable/disable behavior, F8 navigation, production, saved ON/OFF choices, background forecasts and feed-box meals. Test a version update explicitly: `Scripts/config.lua`, `priorities.tsv*` and `automations.tsv*` must survive or be migrated to a persistent location. The manual installer preserves them, but that does not establish what the Workshop loader will do.
 6. Set the minimum supported revision from the verified game build, bump `Version`, save metadata and use **Upload To Steam**. Set the required item, public description, screenshots and visibility on the resulting Workshop page.
 
-The [official uploader guide](https://github.com/pocketpairjp/PalworldModUploader/blob/main/PalworldModUploader/docs/en/03-ModUploader.md) describes the registration/upload steps. No Steam item ID is committed here, and building this package does not install, subscribe to, or upload anything.
+The [official uploader guide](https://github.com/pocketpairjp/PalworldModUploader/blob/main/PalworldModUploader/docs/en/03-ModUploader.md) describes the upload steps. Update the existing item rather than creating another one. Preserve `.workshop.json` and test settings migration/backups first. Building this package does not install, subscribe to, or upload anything.

@@ -4,6 +4,8 @@ Manage your guild's loaded bases from the same menu as Inventory, Party and Guil
 
 **Public beta · Windows Steam · MIT license**
 
+**Working tree: beta.2 candidate.** The production settings and stability changes below have automated coverage; live acceptance/performance testing and publication are pending. The download link still points to the published beta.1.
+
 [Download the beta](https://github.com/PascalMeusel/PalworldAutoProduction/releases/tag/v0.1.0-beta.1) · [Report an issue](https://github.com/PascalMeusel/PalworldAutoProduction/issues) · [Changelog](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/CHANGELOG.md)
 
 Tested during development on Windows Steam Palworld `v1.0.5.102999` with the Palworld UE4SS fork at `ba2efd55`. Single-player/local host is the primary target. Compatibility with other game versions and multiplayer setups is not established. Back up your world before trying a beta. Requires a separately installed compatible [UE4SS runtime](https://github.com/Okaetsu/RE-UE4SS); the release does not bundle a loader or game assets.
@@ -12,7 +14,7 @@ Tested during development on Windows Steam Palworld `v1.0.5.102999` with the Pal
 
 *Preview rendered from example data; the game supplies its own native background and fonts.*
 
-Steam Workshop packaging is [prepared as a draft](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/docs/workshop.md), pending loader installation/update testing. There is no published Workshop item yet.
+The author has uploaded the beta to [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3837541491). See the [packaging and update notes](https://github.com/PascalMeusel/PalworldAutoProduction/blob/main/docs/workshop.md); the candidate still needs validation through the Workshop loader.
 
 ## Open Bases
 
@@ -49,7 +51,15 @@ Auto Produce applies to recipe workstations such as kitchens, furnaces, medicine
 
 Settings live in `Scripts/automations.tsv` beside the mod, with a `.bak` recovery copy. Keep these files when moving the mod to another installation; the installer preserves them. Settings from the previous session-only version cannot be recovered: enable the stations you want once after this update. A demolished and rebuilt station has a new ID and starts OFF. Save failures appear in the log, the Auto Produce tooltip and the Bases controls; the choice remains in memory and saving is retried.
 
-A queued batch is counted only after the game reports the matching recipe and remaining quantity. Rejected or unanswered requests back off. Output estimates use observed queue decreases and recipe yields over a sixty-second window; manual cancellations and queue edits can affect them.
+**Batch size:** in **Bases → Production**, click a station's **Batch** button. Choose 1, 5, 10 or another preset, or use +/− for an exact value from 1 to 9999. The setting is saved per station and applies to its next refill. Ten is the default batch size, never a lifetime production limit. If only three crafts are affordable, a ten-craft setting queues three and waits for more supplies afterward.
+
+**Keep in base storage:** the same screen offers an optional target, such as 100 Salad. **Unlimited** is the default. The mod pauses new refills when stored stock plus tracked automatic batches meets the target, then resumes as stock is used. This counts the selected recipe's output items, including multi-item yields, and excludes carried inventory. Automatic stations in this mod reserve their requested output together. Set a target on every station you want limited; an Unlimited station keeps refilling. Manual queues, other mods, other players and output delivered between measurements can exceed the target; a single craft can also yield more items than the remaining deficit. Existing queues always finish. Changing recipe resets the old product's target to Unlimited.
+
+Refills wait until the preceding batch has finished and its products have been collected. Production/pickup notifications can wake just the affected station after a short deferred delay; bursts are coalesced, each station is rate limited, and at most two stations are handled per callback. Ordinary polling remains the fallback. These are design bounds, not measured FPS results; compare `FAST_REFILL = false` during native acceptance. A rejected request still backs off rather than hammering the game.
+
+The character must be in the station's guild base for a new refill. Leaving keeps the saved choice ON and shows **Visit base to resume**; accepted queues continue normally. **Waiting for pickup**, **Waiting for resources**, **Stock target reached** and unavailable-data statuses explain pauses. Temporary failures retain the saved choice and retry. A menu or meal error cannot abort all automatic refills.
+
+A queued batch is counted only after the game reports the matching recipe and remaining quantity, or a finish signal/output confirms a very fast batch. Output estimates use observed queue decreases and recipe yields over a sixty-second window; manual cancellations and queue edits can affect them. A batch completed entirely between observations may not contribute a measurable rate.
 
 ## Let your character eat while AFK
 
@@ -76,7 +86,8 @@ From the source directory, `Install.ps1 -ModsDirectory <active Mods directory>` 
 | Setting in Scripts/config.lua | Default | Meaning |
 | --- | --- | --- |
 | ENABLED | true | Load the mod's features |
-| BATCH_SIZE | 10 | Crafts requested per automatic refill |
+| BATCH_SIZE | 10 | Default crafts per refill; individual stations can override it |
+| FAST_REFILL | true | Supplement polling with bounded station finish/pickup notifications |
 | SCAN_INTERVAL_MS | 2000 | Normal check interval with automatic stations |
 | BASE_AUTO_EAT | true | Enable AFK meals at startup |
 | AFK_IDLE_SECONDS | 60 | Inactivity required before eating |

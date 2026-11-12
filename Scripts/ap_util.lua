@@ -25,7 +25,17 @@ end
 function M.valid(v)
     if v == nil then return false end
     local ok, result = pcall(function() return v:IsValid() end)
-    return ok and result == true
+    if not ok or result~=true then return false end
+    -- Some loader builds still expose an object during BeginDestroy. Do not
+    -- call UI/game methods on it merely because its wrapper is non-null.
+    if EObjectFlags then
+        local mask=(EObjectFlags.RF_BeginDestroyed or 0) | (EObjectFlags.RF_FinishDestroyed or 0)
+        if mask~=0 then
+            local checked,destroying=pcall(function() return v:HasAnyFlags(mask) end)
+            if checked and destroying then return false end
+        end
+    end
+    return true
 end
 function M.read(fn)
     local ok, result = pcall(fn)

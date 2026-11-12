@@ -9,6 +9,8 @@ local snapshot = {at=0,camps={}}
 local last_sample, menu_open, sampling_until = 0, false, 0
 local get_automation, set_automation, recipe_choices, supply_check, wake
 local get_meals,toggle_meals
+local get_batch_size,set_batch_size
+local get_stock_target,set_stock_target
 local products, yields = {}, {}
 local session_controller = nil
 local last_diagnostic,last_slow= nil,0
@@ -33,12 +35,14 @@ function M.configure(options)
     get_automation,set_automation,wake=options.get_automation,options.set_automation,options.wake
     recipe_choices,supply_check=options.recipe_choices,options.supply_check
     get_meals,toggle_meals=options.get_meals,options.toggle_meals
+    get_batch_size,set_batch_size=options.get_batch_size,options.set_batch_size
+    get_stock_target,set_stock_target=options.get_stock_target,options.set_stock_target
     ui.on_tab_click=function() M.open(products,yields) end
     data.init(); priorities.init(wake)
 end
 function M.is_open() return ui.visible and U.valid(ui.widget) end
 function M.needs_tick() return M.is_open() or os.time()<sampling_until or priorities.has_work() end
-function M.close() state.picker=nil;state.plan=nil;ui.cancel_open();ui.hide(menu_open) end
+function M.close() state.picker=nil;state.plan=nil;state.batch=nil;ui.cancel_open();ui.hide(menu_open) end
 function M.close_menu() return ui.close_menu() end
 function M.toggle(recipe_products, recipe_yields)
     sync_session(U.controller())
@@ -72,6 +76,12 @@ local function publish(result,now)
     snapshot=result
     local pals,stations,feed_boxes=0,0,0
     for _,camp in ipairs(snapshot.camps) do
+        if get_batch_size then
+            for _,row in ipairs(camp.producers) do
+                row.batch_size=get_batch_size(row.station)
+                row.stock_target=get_stock_target and get_stock_target(row.station) or 0
+            end
+        end
         pals=pals+#camp.pals;stations=stations+#camp.producers;feed_boxes=feed_boxes+camp.food_boxes
     end
     local diagnostic=table.concat({#snapshot.camps,pals,stations,feed_boxes,tostring(snapshot.warning)},":")
@@ -153,9 +163,9 @@ function M.handle_click(recipe_products,recipe_yields,direction)
     end
     if direction==1 and action.kind~="priority" then return true end
     if action.kind=="close" then M.close_menu();return true
-    elseif action.kind=="base" then state.base=action.id;state.filters={};state.notice=nil;state.picker=nil;state.plan=nil
+    elseif action.kind=="base" then state.base=action.id;state.filters={};state.notice=nil;state.picker=nil;state.plan=nil;state.batch=nil
     elseif action.kind=="view" then
-        state.view=action.view;state.picker=nil;state.plan=nil
+        state.view=action.view;state.picker=nil;state.plan=nil;state.batch=nil
         state.notice=nil
         if action.filter then state.filters=state.filters or {};state.filters[state.view]=action.filter end
         if action.mode then state.overview_mode=action.mode end
@@ -190,7 +200,21 @@ function M.handle_click(recipe_products,recipe_yields,direction)
                 end
             end
         end
-    elseif action.kind=="back_stations" then state.picker=nil;state.plan=nil;state.notice=nil
+    elseif action.kind=="batch" and get_batch_size then
+        state.batch={base=state.base,row=action.station,count=get_batch_size(action.station.station),
+            target=get_stock_target and get_stock_target(action.station.station) or 0}
+        state.notice=nil
+    elseif action.kind=="set_batch" and state.batch and set_batch_size then
+        local count=action.count or U.clamp(state.batch.count+action.delta,1,9999)
+        local ok,message=set_batch_size(state.batch.row,count)
+        if ok then state.batch.count=count end
+        state.notice=message
+    elseif action.kind=="set_target" and state.batch and set_stock_target then
+        local target=action.target or U.clamp(state.batch.target+action.delta,0,999999)
+        local ok,message=set_stock_target(state.batch.row,target)
+        if ok then state.batch.target=target end
+        state.notice=message
+    elseif action.kind=="back_stations" then state.picker=nil;state.plan=nil;state.batch=nil;state.notice=nil
     elseif action.kind=="choose" and recipe_choices and state.picker then
         local ok,reason
         for _,camp in ipairs(snapshot.camps) do
